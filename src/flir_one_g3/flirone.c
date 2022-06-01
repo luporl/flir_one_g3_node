@@ -33,8 +33,6 @@
 #include <time.h>
 #include <unistd.h>
 
-#include <linux/videodev2.h>
-
 #include "font5x7.h"
 #include "jpeglib.h"
 #include "plank.h"
@@ -55,9 +53,6 @@
 // max chars in line
 #define MAX_CHARS2      (FRAME_WIDTH2 / 6 + (flirone_pro ? 0 : 1))
 
-#define FRAME_FORMAT1   V4L2_PIX_FMT_MJPEG
-#define FRAME_FORMAT2   V4L2_PIX_FMT_RGB24
-
 #define FONT_COLOR_DFLT 0xff
 
 /* USB defs */
@@ -77,10 +72,17 @@
 
 /* global data */
 
-static unsigned char colormap[768];
+unsigned char *f1_jpg_ptr;
+size_t f1_jpg_sz;
+unsigned char *f1_ir_ptr;
+size_t f1_ir_sz;
 
-static char video_device1[64];
-static char video_device2[64];
+static unsigned char *fb_proc;
+static unsigned char *fb_proc2;
+
+static unsigned char colormap[768];
+static int f1_state;
+
 static int frame_width2 = 80;
 static int frame_height2 = 80;
 static int frame_owidth2 = 80;
@@ -92,25 +94,11 @@ static char pal_colors = 0;
 
 static int FFC = 0;    // detect FFC
 
-static int fdwr1 = 0;
-static int fdwr2 = 0;
 static struct libusb_device_handle *devh = NULL;
 static unsigned buf85pointer = 0;
 static unsigned char buf85[BUF85SIZE];
 
 /* functions */
-
-void print_format(struct v4l2_format*vid_format)
-{
-    printf("     vid_format->type                =%d\n",     vid_format->type );
-    printf("     vid_format->fmt.pix.width       =%d\n",     vid_format->fmt.pix.width );
-    printf("     vid_format->fmt.pix.height      =%d\n",     vid_format->fmt.pix.height );
-    printf("     vid_format->fmt.pix.pixelformat =%d\n",     vid_format->fmt.pix.pixelformat);
-    printf("     vid_format->fmt.pix.sizeimage   =%u\n",     vid_format->fmt.pix.sizeimage );
-    printf("     vid_format->fmt.pix.field       =%d\n",     vid_format->fmt.pix.field );
-    printf("     vid_format->fmt.pix.bytesperline=%d\n",     vid_format->fmt.pix.bytesperline );
-    printf("     vid_format->fmt.pix.colorspace  =%d\n",     vid_format->fmt.pix.colorspace );
-}
 
 void font_write(unsigned char *fb, int x, int y, const char *string,
     unsigned char color)
@@ -142,78 +130,7 @@ static double raw2temperature(unsigned short RAW)
     return PlanckB/log(PlanckR1/(PlanckR2*(RAWobj+PlanckO))+PlanckF)-273.15;
 }
 
-static void startv4l2()
-{
-    int ret_code = 0;
-    struct v4l2_capability vid_caps1 = {}, vid_caps2 = {};
-    struct v4l2_format vid_format1 = {}, vid_format2 = {};
-    size_t linewidth1 = 0, framesize1 = 0;
-    size_t linewidth2 = 0, framesize2 = 0;
-
-    //open video_device1
-    printf("using output device: %s\n", video_device1);
-
-    fdwr1 = open(video_device1, O_RDWR);
-    assert(fdwr1 >= 0);
-
-    ret_code = ioctl(fdwr1, VIDIOC_QUERYCAP, &vid_caps1);
-    assert(ret_code != -1);
-
-    memset(&vid_format1, 0, sizeof(vid_format1));
-
-    ret_code = ioctl(fdwr1, VIDIOC_G_FMT, &vid_format1);
-
-    linewidth1 = FRAME_WIDTH1;
-    framesize1 = FRAME_WIDTH1 * FRAME_HEIGHT1;
-
-    vid_format1.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
-    vid_format1.fmt.pix.width = FRAME_WIDTH1;
-    vid_format1.fmt.pix.height = FRAME_HEIGHT1;
-    vid_format1.fmt.pix.pixelformat = FRAME_FORMAT1;
-    vid_format1.fmt.pix.sizeimage = framesize1;
-    vid_format1.fmt.pix.field = V4L2_FIELD_NONE;
-    vid_format1.fmt.pix.bytesperline = linewidth1;
-    vid_format1.fmt.pix.colorspace = V4L2_COLORSPACE_SRGB;
-
-    // set data format
-    ret_code = ioctl(fdwr1, VIDIOC_S_FMT, &vid_format1);
-    assert(ret_code != -1);
-
-    print_format(&vid_format1);
-
-    //open video_device2
-    printf("using output device: %s\n", video_device2);
-
-    fdwr2 = open(video_device2, O_RDWR);
-    assert(fdwr2 >= 0);
-
-    ret_code = ioctl(fdwr2, VIDIOC_QUERYCAP, &vid_caps2);
-    assert(ret_code != -1);
-
-    memset(&vid_format2, 0, sizeof(vid_format2));
-
-    ret_code = ioctl(fdwr2, VIDIOC_G_FMT, &vid_format2);
-
-    linewidth2 = FRAME_WIDTH2;
-    framesize2 = FRAME_WIDTH2 * FRAME_HEIGHT2 * 3; // 8x8x8 Bit
-
-    vid_format2.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
-    vid_format2.fmt.pix.width = FRAME_WIDTH2;
-    vid_format2.fmt.pix.height = FRAME_HEIGHT2;
-    vid_format2.fmt.pix.pixelformat = FRAME_FORMAT2;
-    vid_format2.fmt.pix.sizeimage = framesize2;
-    vid_format2.fmt.pix.field = V4L2_FIELD_NONE;
-    vid_format2.fmt.pix.bytesperline = linewidth2;
-    vid_format2.fmt.pix.colorspace = V4L2_COLORSPACE_SRGB;
-
-    // set data format
-    ret_code = ioctl(fdwr2, VIDIOC_S_FMT, &vid_format2);
-    assert(ret_code != -1);
-
-    print_format(&vid_format2);
-}
-
-static void vframe(char ep[], char EP_error[], int r, int actual_length,
+static int vframe(char ep[], char EP_error[], int r, int actual_length,
     unsigned char buf[], unsigned char *colormap)
 {
     time_t now1;
@@ -221,7 +138,6 @@ static void vframe(char ep[], char EP_error[], int r, int actual_length,
     uint32_t FrameSize, ThermalSize, JpgSize;
     int v, x, y, pos, disp;
     unsigned short pix[FRAME_OWIDTH2 * FRAME_OHEIGHT2];   // original Flir 16 Bit RAW
-    unsigned char *fb_proc, *fb_proc2;
     size_t framesize2 = FRAME_WIDTH2 * FRAME_HEIGHT2 * 3; // 8x8x8 Bit
     int min = 0x10000, max = 0;
     int maxx = -1, maxy = -1;
@@ -230,6 +146,7 @@ static void vframe(char ep[], char EP_error[], int r, int actual_length,
     char st1[100];
     char st2[100];
     struct tm *loctime;
+    int rc;
 
     now1 = time(NULL);
     if (r < 0) {
@@ -239,7 +156,7 @@ static void vframe(char ep[], char EP_error[], int r, int actual_length,
                 ctime(&now1), ep, r, libusb_error_name(r));
             sleep(1);
         }
-        return;
+        return F1L_VFRAME_ERROR;
     }
 
     // reset buffer if the new chunk begins with magic bytes or the buffer size limit is exceeded
@@ -254,7 +171,7 @@ static void vframe(char ep[], char EP_error[], int r, int actual_length,
         //reset buff pointer
         buf85pointer = 0;
         printf("Reset buffer because of bad Magic Byte!\n");
-        return;
+        return F1L_VFRAME_ERROR;
     }
 
     // a quick and dirty job for gcc
@@ -264,7 +181,7 @@ static void vframe(char ep[], char EP_error[], int r, int actual_length,
 
     if (FrameSize + 28 > buf85pointer)
         // wait for next chunk
-        return;
+        return F1L_BUSY;
 
     /*
     printf("actual_len=%d, buf85pointer=%d, FrameSize=%d, ThermalSize=%d, JpgSize=%d\n",
@@ -273,13 +190,7 @@ static void vframe(char ep[], char EP_error[], int r, int actual_length,
 
     // get a full frame, first print the status
     buf85pointer = 0;
-
-    fb_proc = malloc(FRAME_WIDTH2 * FRAME_HEIGHT2);
     memset(fb_proc, 128, FRAME_WIDTH2 * FRAME_HEIGHT2);
-    assert(fb_proc);
-
-    fb_proc2 = malloc(FRAME_WIDTH2 * FRAME_HEIGHT2 * 3); // 8x8x8  Bit RGB buffer
-    assert(fb_proc2);
 
     if (pal_colors) {
         for (y = 0; y < FRAME_HEIGHT2; ++y)
@@ -404,11 +315,12 @@ static void vframe(char ep[], char EP_error[], int r, int actual_length,
     }
 
 render:
+    rc = F1L_OK;
+
     // jpg Visual Image
-    if (write(fdwr1, &buf85[28 + ThermalSize], JpgSize) != JpgSize) {
-        perror("write visual image failed");
-        exit(1);
-    }
+    f1_jpg_ptr = &buf85[28 + ThermalSize];
+    f1_jpg_sz = JpgSize;
+    rc |= F1L_NEW_IMG_FRAME;
 
     if (strncmp((char *)&buf85[28 + ThermalSize + JpgSize + 17], "FFC", 3) == 0) {
         printf("drop FFC frame\n");
@@ -419,16 +331,13 @@ render:
             FFC = 0;  // drop first frame after FFC
         } else {
             // colorized RGB Thermal Image
-            if (write(fdwr2, fb_proc2, framesize2) != (ssize_t)framesize2) {
-                perror("write thermal image failed");
-                exit(1);
-            }
+            f1_ir_ptr = fb_proc2;
+            f1_ir_sz = framesize2;
+            rc |= F1L_NEW_IR_FRAME;
         }
     }
 
-    // free memory
-    free(fb_proc);      // thermal RAW
-    free(fb_proc2);     // visible jpg
+    return rc;
 }
 
 static int find_lvr_flirusb(void)
@@ -494,96 +403,6 @@ out:
     return -1;
 }
 
-static int EPloop(unsigned char *colormap)
-{
-    int r = 0;
-    unsigned char buf[BUF85SIZE];
-    int actual_length;
-    time_t now;
-    char EP85_error[50] = "";
-    unsigned char data[2] = { 0, 0 }; // only a bad dummy
-    int state, timeout;
-
-    if (usb_init() < 0)
-        return -1;
-
-    // save last error status to avoid clutter the log
-    startv4l2();
-
-    state = 1;
-
-    // don't change timeout=100ms !!
-    timeout = 100;
-    while (1) {
-        switch(state) {
-        case 1:
-            printf("stop interface 2 FRAME\n");
-            r = libusb_control_transfer(devh, REQ_TYPE, REQ, V_STOP, INDEX(2),
-                    data, LEN(0), timeout);
-            if (r < 0) {
-                fprintf(stderr, "Control Out error %d\n", r);
-                return r;
-            }
-
-            printf("stop interface 1 FILEIO\n");
-            r = libusb_control_transfer(devh, REQ_TYPE, REQ, V_STOP, INDEX(1),
-                    data, LEN(0), timeout);
-            if (r < 0) {
-                fprintf(stderr, "Control Out error %d\n", r);
-                return r;
-            }
-
-            printf("\nstart interface 1 FILEIO\n");
-            r = libusb_control_transfer(devh, REQ_TYPE, REQ, V_START,
-                    INDEX(1), data, LEN(0), timeout);
-            if (r < 0) {
-                fprintf(stderr, "Control Out error %d\n", r);
-                return r;
-            }
-            now = time(0);  // Get the system time
-            printf("\n:xx %s", ctime(&now));
-            state = 2;
-            break;
-
-        case 2:
-            printf("\nAsk for video stream, start EP 0x85:\n");
-            r = libusb_control_transfer(devh, REQ_TYPE, REQ, V_START,
-                    INDEX(2), data, LEN(2), timeout * 2);
-            if (r < 0) {
-                fprintf(stderr, "Control Out error %d\n", r);
-                return r;
-            }
-
-            state = 3;
-            break;
-
-        case 3:
-            // endless loop
-            // poll Frame Endpoints 0x85
-            r = libusb_bulk_transfer(devh, 0x85, buf, sizeof(buf),
-                    &actual_length, timeout);
-            if (actual_length > 0)
-                vframe("0x85", EP85_error, r, actual_length, buf, colormap);
-            break;
-        }
-
-        // poll Endpoints 0x81, 0x83
-        r = libusb_bulk_transfer(devh, 0x81, buf, sizeof(buf), &actual_length, 10);
-        r = libusb_bulk_transfer(devh, 0x83, buf, sizeof(buf), &actual_length, 10);
-        if (strcmp(libusb_error_name(r), "LIBUSB_ERROR_NO_DEVICE")==0) {
-            fprintf(stderr, "EP 0x83 LIBUSB_ERROR_NO_DEVICE -> reset USB\n");
-            goto out;
-        }
-    }
-
-    // never reached ;-)
-    libusb_release_interface(devh, 0);
-
-out:
-    usb_exit();
-    return r >= 0 ? r : -r;
-}
-
 int f1_init(struct f1_cfg *cfg)
 {
     FILE *fp;
@@ -616,10 +435,96 @@ int f1_init(struct f1_cfg *cfg)
     }
     fclose(fp);
 
+    if (usb_init() < 0)
+        return -1;
+
+    fb_proc = malloc(FRAME_WIDTH2 * FRAME_HEIGHT2);
+    assert(fb_proc);
+    fb_proc2 = malloc(FRAME_WIDTH2 * FRAME_HEIGHT2 * 3); // 8x8x8  Bit RGB buffer
+    assert(fb_proc2);
+
+    f1_state = 1;
     return 0;
+}
+
+void f1_exit(void)
+{
+    // free memory
+    free(fb_proc);      // thermal RAW
+    free(fb_proc2);     // visible jpg
 }
 
 int f1_loop(void)
 {
-    return EPloop(colormap);
+    int r = 0;
+    unsigned char buf[BUF85SIZE];
+    int actual_length;
+    time_t now;
+    char EP85_error[50] = "";
+    unsigned char data[2] = { 0, 0 }; // only a bad dummy
+    int timeout = 100;  // don't change timeout=100ms !!
+    int rc = F1L_OK;
+
+    switch (f1_state) {
+    case 1:
+        printf("stop interface 2 FRAME\n");
+        r = libusb_control_transfer(devh, REQ_TYPE, REQ, V_STOP, INDEX(2),
+                data, LEN(0), timeout);
+        if (r < 0) {
+            fprintf(stderr, "Control Out error %d\n", r);
+            return F1L_INIT1_ERROR;
+        }
+
+        printf("stop interface 1 FILEIO\n");
+        r = libusb_control_transfer(devh, REQ_TYPE, REQ, V_STOP, INDEX(1),
+                data, LEN(0), timeout);
+        if (r < 0) {
+            fprintf(stderr, "Control Out error %d\n", r);
+            return F1L_INIT1_ERROR;
+        }
+
+        printf("\nstart interface 1 FILEIO\n");
+        r = libusb_control_transfer(devh, REQ_TYPE, REQ, V_START,
+                INDEX(1), data, LEN(0), timeout);
+        if (r < 0) {
+            fprintf(stderr, "Control Out error %d\n", r);
+            return F1L_INIT1_ERROR;
+        }
+        now = time(0);  // Get the system time
+        printf("\n:xx %s", ctime(&now));
+        f1_state = 2;
+        break;
+
+    case 2:
+        printf("\nAsk for video stream, start EP 0x85:\n");
+        r = libusb_control_transfer(devh, REQ_TYPE, REQ, V_START,
+                INDEX(2), data, LEN(2), timeout * 2);
+        if (r < 0) {
+            fprintf(stderr, "Control Out error %d\n", r);
+            return F1L_INIT2_ERROR;
+        }
+
+        f1_state = 3;
+        break;
+
+    case 3:
+        // endless loop
+        // poll Frame Endpoints 0x85
+        r = libusb_bulk_transfer(devh, 0x85, buf, sizeof(buf),
+                &actual_length, timeout);
+        if (actual_length > 0)
+            rc = vframe("0x85", EP85_error, r, actual_length, buf, colormap);
+        break;
+    }
+
+    // poll Endpoints 0x81, 0x83
+    r = libusb_bulk_transfer(devh, 0x81, buf, sizeof(buf), &actual_length, 10);
+    r = libusb_bulk_transfer(devh, 0x83, buf, sizeof(buf), &actual_length, 10);
+    if (strcmp(libusb_error_name(r), "LIBUSB_ERROR_NO_DEVICE")==0) {
+        fprintf(stderr, "EP 0x83 LIBUSB_ERROR_NO_DEVICE -> reset USB\n");
+        usb_exit();
+        return F1L_USB_ERROR;
+    }
+
+    return rc;
 }

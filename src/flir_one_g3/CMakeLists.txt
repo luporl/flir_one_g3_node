@@ -28,6 +28,10 @@ catkin_package(CATKIN_DEPENDS roscpp rospy std_msgs)
 ###########
 
 include_directories(${LIBUSB_INCLUDE_DIR} ${catkin_INCLUDE_DIRS})
+
+set(CMAKE_C_FLAGS ${CMAKE_C_FLAGS} "-Wall")
+set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} "-Wall")
+
 add_executable(${PROJECT_NAME}_node flir_one_g3_node.cpp flirone.c)
 target_link_libraries(${PROJECT_NAME}_node usb-1.0 ${catkin_LIBRARIES})
 
@@ -37,6 +41,20 @@ target_link_libraries(${PROJECT_NAME}_node usb-1.0 ${catkin_LIBRARIES})
 
 install(TARGETS ${PROJECT_NAME}_node RUNTIME DESTINATION
         ${CATKIN_PACKAGE_BIN_DESTINATION})
+
+install(FILES
+    palettes/15.raw
+    palettes/17.raw
+    palettes/7.raw
+    palettes/85.raw
+    palettes/92.raw
+    palettes/Grayscale.raw
+    palettes/Grey.raw
+    palettes/Iron2.raw
+    palettes/Iron_Black.raw
+    palettes/Rainbow.raw
+    DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/palettes
+)
 
 #############
 ## Testing ##
