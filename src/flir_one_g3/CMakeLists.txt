@@ -8,6 +8,10 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
 )
 
+find_path(LIBUSB_INCLUDE_DIR
+    NAMES libusb.h
+    PATH_SUFFIXES "include" "libusb" "libusb-1.0")
+
 ###################################
 ## catkin specific configuration ##
 ###################################
@@ -23,9 +27,9 @@ catkin_package(CATKIN_DEPENDS roscpp rospy std_msgs)
 ## Build ##
 ###########
 
-include_directories(${catkin_INCLUDE_DIRS})
-add_executable(${PROJECT_NAME}_node flir_one_g3_node.cpp)
-target_link_libraries(${PROJECT_NAME}_node ${catkin_LIBRARIES})
+include_directories(${LIBUSB_INCLUDE_DIR} ${catkin_INCLUDE_DIRS})
+add_executable(${PROJECT_NAME}_node flir_one_g3_node.cpp flirone.c)
+target_link_libraries(${PROJECT_NAME}_node usb-1.0 ${catkin_LIBRARIES})
 
 #############
 ## Install ##
