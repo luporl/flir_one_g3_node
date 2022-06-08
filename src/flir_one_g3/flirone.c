@@ -349,8 +349,10 @@ static int find_lvr_flirusb(void)
 static void usb_exit(void)
 {
     //close the device
-    libusb_reset_device(devh);
-    libusb_close(devh);
+    if (devh) {
+        libusb_reset_device(devh);
+        libusb_close(devh);
+    }
     libusb_exit(NULL);
 }
 
