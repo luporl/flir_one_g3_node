@@ -13,9 +13,12 @@
 #include <vector>
 
 // C
+#include <libgen.h>
 #include <sys/time.h>
 
 #define NODE_NAME   "flir_one_g3"
+#define PALETTE     "Rainbow.raw"
+
 
 /* helpers to allow flirone to use ROS */
 extern "C" {
@@ -145,15 +148,35 @@ int main(int argc, char **argv)
 {
     struct f1_cfg f1cfg = {};
     struct f1_frame *f1_frame;
+    char *pal;
     int rc;
+
+    // find palettes path
+    strncpy(strbuf, argv[0], sizeof(strbuf));
+    strbuf[sizeof(strbuf) - 1] = 0;
+    pal = strbuf;
+    if (strlen(pal) > 512) {
+        ROS_ERROR("Executable path is too long");
+        return -1;
+    }
+    // go back 3 levels to get to install dir
+    for (int i = 0; i < 3; i++) {
+        pal = dirname(pal);
+        if (strcmp(pal, ".") == 0 || strcmp(pal, "/") == 0) {
+            ROS_ERROR("Couldn't find path to palettes dir");
+            return -1;
+        }
+    }
+    // then append relative palette path
+    strcat(pal, "/share/flir_one_g3/palettes/" PALETTE);
 
     // Init ROS
     ros::init(argc, argv, "flir_one_g3_node");
     ros::NodeHandle n;
 
     // Init flirone
-    f1cfg.pal_path = "palettes/Rainbow.raw";
-    // f1cfg.pal_path = "palettes/Iron2.raw";
+    ROS_INFO("Palette path: %s", pal);
+    f1cfg.pal_path = pal;
     // f1cfg.pal_colors = 1;
     // f1cfg.pal_inv = 1;
     f1_frame = f1_init(&f1cfg);
