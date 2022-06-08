@@ -14,6 +14,35 @@
 // C
 #include <sys/time.h>
 
+#define NODE_NAME   "flir_one_g3"
+
+/* helpers to allow flirone to use ROS */
+extern "C" {
+
+static char strbuf[1024];
+
+void ros_info(const char *fmt, ...)
+{
+    va_list ap;
+
+    va_start(ap, fmt);
+    vsprintf(strbuf, fmt, ap);
+    va_end(ap);
+    ROS_INFO("%s", strbuf);
+}
+
+void ros_error(const char *fmt, ...)
+{
+    va_list ap;
+
+    va_start(ap, fmt);
+    vsprintf(strbuf, fmt, ap);
+    va_end(ap);
+    ROS_ERROR("%s", strbuf);
+}
+
+}
+
 class ImageMsg
 {
 public:
@@ -87,23 +116,24 @@ int main(int argc, char **argv)
     struct f1_frame *f1_frame;
     int rc;
 
+    // Init ROS
+    ros::init(argc, argv, "flir_one_g3_node");
+    ros::NodeHandle n;
+
     // Init flirone
     f1cfg.pal_path = "palettes/Rainbow.raw";
     f1_frame = f1_init(&f1cfg);
     if (f1_frame == NULL)
         return -1;
 
-    // Init ROS
-    ros::init(argc, argv, "flir_one_g3_node");
-    ros::NodeHandle n;
-
     // Setup publishers
     // (topic, msg_queue_size)
-    ros::Publisher dbg_pub = n.advertise<std_msgs::String>("/f1g3/dbg", 1000);
+    ros::Publisher dbg_pub = n.advertise<std_msgs::String>(
+        "/" NODE_NAME "/dbg", 1000);
     ros::Publisher mjpeg_pub = n.advertise<sensor_msgs::CompressedImage>(
-        "/f1g3/optical/image_raw/compressed", 256);
+        "/" NODE_NAME "/optical/image_raw/compressed", 256);
     ros::Publisher thermal_pub = n.advertise<sensor_msgs::Image>(
-        "/f1g3/thermal/image_raw", 256);
+        "/" NODE_NAME "/thermal/image_raw", 256);
 
     Mjpeg mjpeg(mjpeg_pub);
     Thermal thermal(thermal_pub);
@@ -114,29 +144,26 @@ int main(int argc, char **argv)
         std_msgs::String msg;
 
         std::stringstream ss;
-        ss << "f1g3_dbg#" << std::setw(3) << i << " ";
+        ss << "msg#" << std::setw(3) << i << " ";
 
         // run flirone and check results
         rc = f1_loop();
         if (rc < 0) {
-            ss << "f1_loop: error";
+            ss << "ERROR acquiring frame";
         } else {
-            // ROS_INFO("f1_loop: ok");
-            if (rc & (F1L_NEW_IMG_FRAME | F1L_NEW_IR_FRAME))
-                ss << "f1_loop:";
             if (rc & F1L_NEW_IMG_FRAME)
-                ss << " NEW_IMG_FRAME";
+                ss << "NEW_IMG_FRAME";
             if (rc & F1L_NEW_IR_FRAME)
                 ss << " NEW_IR_FRAME";
             // if (rc & F1L_BUSY)
-            //  ROS_INFO("f1_loop: BUSY");
+            //  ss << " BUSY";
         }
 
-        if (rc & (F1L_NEW_IMG_FRAME | F1L_NEW_IR_FRAME)) {
+        if (rc < 0 || (rc & (F1L_NEW_IMG_FRAME | F1L_NEW_IR_FRAME))) {
             gettimeofday(&tv, NULL);
 
             msg.data = ss.str();
-            ROS_INFO("%s", msg.data.c_str());
+            ROS_DEBUG("%s", msg.data.c_str());
             dbg_pub.publish(msg);
         }
 

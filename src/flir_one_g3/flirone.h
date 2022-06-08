@@ -40,6 +40,9 @@ struct f1_frame *f1_init(struct f1_cfg *cfg);
 void f1_exit(void);
 int f1_loop(void);
 
+void ros_info(const char *fmt, ...);
+void ros_error(const char *fmt, ...);
+
 #ifdef __cplusplus
 }
 #endif

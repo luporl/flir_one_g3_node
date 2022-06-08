@@ -149,7 +149,7 @@ static int vframe(char ep[], char EP_error[], int r, int actual_length,
     if (r < 0) {
         if (strcmp(EP_error, libusb_error_name(r)) != 0) {
             strcpy(EP_error, libusb_error_name(r));
-            fprintf(stderr, "\n: %s >>>>>>>>>>>>>>>>>bulk transfer (in) %s:%i %s\n",
+            ros_error("%s >>>>>>>>>>>>>>>>>bulk transfer (in) %s:%i %s",
                 ctime(&now1), ep, r, libusb_error_name(r));
             sleep(1);
         }
@@ -167,7 +167,7 @@ static int vframe(char ep[], char EP_error[], int r, int actual_length,
     if (strncmp((char *)buf85, magicbyte, 4) != 0) {
         //reset buff pointer
         buf85pointer = 0;
-        printf("Reset buffer because of bad Magic Byte!\n");
+        ros_info("Reset buffer because of bad Magic Byte!");
         return F1L_VFRAME_ERROR;
     }
 
@@ -179,11 +179,6 @@ static int vframe(char ep[], char EP_error[], int r, int actual_length,
     if (FrameSize + 28 > buf85pointer)
         // wait for next chunk
         return F1L_BUSY;
-
-    /*
-    printf("actual_len=%d, buf85pointer=%d, FrameSize=%d, ThermalSize=%d, JpgSize=%d\n",
-        actual_length, buf85pointer, FrameSize, ThermalSize, JpgSize);
-     */
 
     // get a full frame, first print the status
     buf85pointer = 0;
@@ -234,7 +229,6 @@ static int vframe(char ep[], char EP_error[], int r, int actual_length,
 
     assert(maxx != -1);
     assert(maxy != -1);
-    /* printf("min=%d max=%d x=%d y=%d\n", min, max, maxx, maxy); */
 
     // scale the data in the array
     delta = max - min;
@@ -320,11 +314,11 @@ render:
     rc |= F1L_NEW_IMG_FRAME;
 
     if (strncmp((char *)&buf85[28 + ThermalSize + JpgSize + 17], "FFC", 3) == 0) {
-        printf("drop FFC frame\n");
+        ros_info("drop FFC frame");
         FFC = 1;    // drop all FFC frames
     } else {
         if (FFC == 1) {
-            printf("drop first frame after FFC\n");
+            ros_info("drop first frame after FFC");
             FFC = 0;  // drop first frame after FFC
         } else {
             // colorized RGB Thermal Image
@@ -359,42 +353,42 @@ static int usb_init(void)
 
     r = libusb_init(NULL);
     if (r < 0) {
-        fprintf(stderr, "failed to initialise libusb\n");
-        exit(1);
+        ros_error("failed to initialise libusb");
+        return -1;
     }
 
     r = find_lvr_flirusb();
     if (r < 0) {
-        fprintf(stderr, "Could not find/open device\n");
+        ros_error("Could not find/open device");
         goto out;
     }
-    printf("Successfully find the Flir One G2/G3/Pro device\n");
+    ros_info("Successfully find the Flir One G2/G3/Pro device");
 
     r = libusb_set_configuration(devh, 3);
     if (r < 0) {
-       fprintf(stderr, "libusb_set_configuration error %d\n", r);
+       ros_error("libusb_set_configuration error %d", r);
        goto out;
     }
-   printf("Successfully set usb configuration 3\n");
+   ros_info("Successfully set usb configuration 3");
 
     // Claiming of interfaces is a purely logical operation;
     // it does not cause any requests to be sent over the bus.
     r = libusb_claim_interface(devh, 0);
     if (r < 0) {
-        fprintf(stderr, "libusb_claim_interface 0 error %d\n", r);
+        ros_error("libusb_claim_interface 0 error %d", r);
         goto out;
     }
     r = libusb_claim_interface(devh, 1);
     if (r < 0) {
-        fprintf(stderr, "libusb_claim_interface 1 error %d\n", r);
+        ros_error("libusb_claim_interface 1 error %d", r);
         goto out;
     }
     r = libusb_claim_interface(devh, 2);
     if (r < 0) {
-        fprintf(stderr, "libusb_claim_interface 2 error %d\n", r);
+        ros_error("libusb_claim_interface 2 error %d", r);
         goto out;
     }
-    printf("Successfully claimed interface 0, 1, 2\n");
+    ros_info("Successfully claimed interface 0, 1, 2");
     return 0;
 
 out:
@@ -469,40 +463,40 @@ int f1_loop(void)
 
     switch (f1_state) {
     case 1:
-        printf("stop interface 2 FRAME\n");
+        ros_info("stop interface 2 FRAME");
         r = libusb_control_transfer(devh, REQ_TYPE, REQ, V_STOP, INDEX(2),
                 data, LEN(0), timeout);
         if (r < 0) {
-            fprintf(stderr, "Control Out error %d\n", r);
+            ros_error("Control Out error %d", r);
             return F1L_INIT1_ERROR;
         }
 
-        printf("stop interface 1 FILEIO\n");
+        ros_info("stop interface 1 FILEIO");
         r = libusb_control_transfer(devh, REQ_TYPE, REQ, V_STOP, INDEX(1),
                 data, LEN(0), timeout);
         if (r < 0) {
-            fprintf(stderr, "Control Out error %d\n", r);
+            ros_error("Control Out error %d", r);
             return F1L_INIT1_ERROR;
         }
 
-        printf("\nstart interface 1 FILEIO\n");
+        ros_info("start interface 1 FILEIO");
         r = libusb_control_transfer(devh, REQ_TYPE, REQ, V_START,
                 INDEX(1), data, LEN(0), timeout);
         if (r < 0) {
-            fprintf(stderr, "Control Out error %d\n", r);
+            ros_error("Control Out error %d", r);
             return F1L_INIT1_ERROR;
         }
         now = time(0);  // Get the system time
-        printf("\n:xx %s", ctime(&now));
+        ros_info(":xx %s", ctime(&now));
         f1_state = 2;
         break;
 
     case 2:
-        printf("\nAsk for video stream, start EP 0x85:\n");
+        ros_info("Ask for video stream, start EP 0x85:");
         r = libusb_control_transfer(devh, REQ_TYPE, REQ, V_START,
                 INDEX(2), data, LEN(2), timeout * 2);
         if (r < 0) {
-            fprintf(stderr, "Control Out error %d\n", r);
+            ros_error("Control Out error %d", r);
             return F1L_INIT2_ERROR;
         }
 
@@ -523,7 +517,7 @@ int f1_loop(void)
     r = libusb_bulk_transfer(devh, 0x81, buf, sizeof(buf), &actual_length, 10);
     r = libusb_bulk_transfer(devh, 0x83, buf, sizeof(buf), &actual_length, 10);
     if (strcmp(libusb_error_name(r), "LIBUSB_ERROR_NO_DEVICE")==0) {
-        fprintf(stderr, "EP 0x83 LIBUSB_ERROR_NO_DEVICE -> reset USB\n");
+        ros_error("EP 0x83 LIBUSB_ERROR_NO_DEVICE -> reset USB");
         usb_exit();
         return F1L_USB_ERROR;
     }
