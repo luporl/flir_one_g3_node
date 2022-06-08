@@ -2,6 +2,7 @@
 #define SRC_FLIRONE_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 /* F1 loop return status */
 #define F1L_OK               0
@@ -25,12 +26,17 @@ struct f1_cfg
 extern "C" {
 #endif
 
-extern unsigned char *f1_jpg_ptr;
-extern size_t f1_jpg_sz;
-extern unsigned char *f1_ir_ptr;
-extern size_t f1_ir_sz;
+struct f1_frame
+{
+    unsigned char *jpg_ptr;
+    size_t jpg_sz;
+    unsigned char *ir_ptr;
+    size_t ir_sz;
+    uint32_t ir_width;
+    uint32_t ir_height;
+};
 
-int f1_init(struct f1_cfg *cfg);
+struct f1_frame *f1_init(struct f1_cfg *cfg);
 void f1_exit(void);
 int f1_loop(void);
 

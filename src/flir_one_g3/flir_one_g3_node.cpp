@@ -5,6 +5,7 @@
 #include <ros/ros.h>
 #include <std_msgs/String.h>
 #include <sensor_msgs/CompressedImage.h>
+#include <sensor_msgs/Image.h>
 
 // C++
 #include <sstream>
@@ -13,41 +14,83 @@
 // C
 #include <sys/time.h>
 
+class ImageMsg
+{
+public:
+    virtual void publish(struct f1_frame *frame, const struct timeval &tv) = 0;
+
+protected:
+    void fill_header(std_msgs::Header &hdr, const std::string &id,
+        const struct timeval &tv)
+    {
+        hdr.seq = m_seq++;
+        hdr.stamp.sec = tv.tv_sec;
+        hdr.stamp.nsec = tv.tv_usec * 1000;
+        hdr.frame_id = id;
+    }
+
+private:
+    uint32_t m_seq = 1;
+};
+
 // MJPEG publisher
-class Mjpeg {
+class Mjpeg : public ImageMsg
+{
 public:
     Mjpeg(ros::Publisher &pub) : m_pub(pub)
     {}
 
-    void publish()
+    void publish(struct f1_frame *frame, const struct timeval &tv)
     {
-        struct timeval tv = {};
-        gettimeofday(&tv, NULL);
-
         sensor_msgs::CompressedImage msg;
-        msg.header.seq = m_seq++;
-        msg.header.stamp.sec = tv.tv_sec;
-        msg.header.stamp.nsec = tv.tv_usec * 1000;
-        msg.header.frame_id = "optical_camera";
+
+        fill_header(msg.header, "optical_camera", tv);
         msg.format = "jpeg";
-        msg.data = std::vector<unsigned char>(f1_jpg_ptr,
-            f1_jpg_ptr + f1_jpg_sz);
+        msg.data = std::vector<unsigned char>(frame->jpg_ptr,
+            frame->jpg_ptr + frame->jpg_sz);
         m_pub.publish(msg);
     }
 
 private:
     ros::Publisher &m_pub;
-    uint32_t m_seq = 1;
+};
+
+// Thermal images publisher
+class Thermal : public ImageMsg
+{
+public:
+    Thermal(ros::Publisher &pub) : m_pub(pub)
+    {}
+
+    void publish(struct f1_frame *frame, const struct timeval &tv)
+    {
+        sensor_msgs::Image msg;
+
+        fill_header(msg.header, "thermal_camera", tv);
+        msg.height = frame->ir_height;
+        msg.width = frame->ir_width;
+        msg.encoding = "rgb8";
+        msg.is_bigendian = false;
+        msg.step = msg.width * 3;
+        msg.data = std::vector<unsigned char>(frame->ir_ptr,
+            frame->ir_ptr + frame->ir_sz);
+        m_pub.publish(msg);
+    }
+
+private:
+    ros::Publisher &m_pub;
 };
 
 int main(int argc, char **argv)
 {
     struct f1_cfg f1cfg = {};
+    struct f1_frame *f1_frame;
     int rc;
 
     // Init flirone
     f1cfg.pal_path = "palettes/Rainbow.raw";
-    if (f1_init(&f1cfg) != 0)
+    f1_frame = f1_init(&f1cfg);
+    if (f1_frame == NULL)
         return -1;
 
     // Init ROS
@@ -58,16 +101,22 @@ int main(int argc, char **argv)
     // (topic, msg_queue_size)
     ros::Publisher dbg_pub = n.advertise<std_msgs::String>("/f1g3/dbg", 1000);
     ros::Publisher mjpeg_pub = n.advertise<sensor_msgs::CompressedImage>(
-        "/f1g3/image_raw/compressed", 256);
+        "/f1g3/optical/image_raw/compressed", 256);
+    ros::Publisher thermal_pub = n.advertise<sensor_msgs::Image>(
+        "/f1g3/thermal/image_raw", 256);
 
     Mjpeg mjpeg(mjpeg_pub);
+    Thermal thermal(thermal_pub);
 
+    // main loop
     for (int i = 0; ros::ok(); i++) {
+        struct timeval tv = {};
         std_msgs::String msg;
 
         std::stringstream ss;
         ss << "f1g3_dbg#" << std::setw(3) << i << " ";
 
+        // run flirone and check results
         rc = f1_loop();
         if (rc < 0) {
             ss << "f1_loop: error";
@@ -84,13 +133,18 @@ int main(int argc, char **argv)
         }
 
         if (rc & (F1L_NEW_IMG_FRAME | F1L_NEW_IR_FRAME)) {
+            gettimeofday(&tv, NULL);
+
             msg.data = ss.str();
             ROS_INFO("%s", msg.data.c_str());
             dbg_pub.publish(msg);
         }
 
+        // publish images
         if (rc & F1L_NEW_IMG_FRAME)
-            mjpeg.publish();
+            mjpeg.publish(f1_frame, tv);
+        if (rc & F1L_NEW_IR_FRAME)
+            thermal.publish(f1_frame, tv);
 
         /* process callbacks */
         ros::spinOnce();

@@ -72,10 +72,7 @@
 
 /* global data */
 
-unsigned char *f1_jpg_ptr;
-size_t f1_jpg_sz;
-unsigned char *f1_ir_ptr;
-size_t f1_ir_sz;
+struct f1_frame f1_frame;
 
 static unsigned char *fb_proc;
 static unsigned char *fb_proc2;
@@ -318,8 +315,8 @@ render:
     rc = F1L_OK;
 
     // jpg Visual Image
-    f1_jpg_ptr = &buf85[28 + ThermalSize];
-    f1_jpg_sz = JpgSize;
+    f1_frame.jpg_ptr = &buf85[28 + ThermalSize];
+    f1_frame.jpg_sz = JpgSize;
     rc |= F1L_NEW_IMG_FRAME;
 
     if (strncmp((char *)&buf85[28 + ThermalSize + JpgSize + 17], "FFC", 3) == 0) {
@@ -331,8 +328,8 @@ render:
             FFC = 0;  // drop first frame after FFC
         } else {
             // colorized RGB Thermal Image
-            f1_ir_ptr = fb_proc2;
-            f1_ir_sz = framesize2;
+            f1_frame.ir_ptr = fb_proc2;
+            f1_frame.ir_sz = framesize2;
             rc |= F1L_NEW_IR_FRAME;
         }
     }
@@ -405,7 +402,7 @@ out:
     return -1;
 }
 
-int f1_init(struct f1_cfg *cfg)
+struct f1_frame *f1_init(struct f1_cfg *cfg)
 {
     FILE *fp;
 
@@ -438,7 +435,7 @@ int f1_init(struct f1_cfg *cfg)
     fclose(fp);
 
     if (usb_init() < 0)
-        return -1;
+        return NULL;
 
     fb_proc = malloc(FRAME_WIDTH2 * FRAME_HEIGHT2);
     assert(fb_proc);
@@ -446,7 +443,10 @@ int f1_init(struct f1_cfg *cfg)
     assert(fb_proc2);
 
     f1_state = 1;
-    return 0;
+
+    f1_frame.ir_width = FRAME_WIDTH2;
+    f1_frame.ir_height = FRAME_HEIGHT2;
+    return &f1_frame;
 }
 
 void f1_exit(void)
