@@ -8,6 +8,7 @@
 #include <sensor_msgs/Image.h>
 
 // C++
+#include <iomanip>
 #include <sstream>
 #include <vector>
 
@@ -110,6 +111,36 @@ private:
     ros::Publisher &m_pub;
 };
 
+// Thermal info publisher
+class ThermalInfo : public ImageMsg
+{
+public:
+    ThermalInfo(ros::Publisher &pub) : m_pub(pub)
+    {}
+
+    void publish(struct f1_frame *frame, const struct timeval &tv)
+    {
+        std_msgs::String msg;
+        std::ostringstream ss;
+
+        ss << "min/med/max temps: ";
+
+        ss << std::fixed << std::setprecision(1) << std::setfill('0')
+           << frame->temp_min << "/"
+           << frame->temp_med << "/"
+           << frame->temp_max;
+
+        ss << " max @ " << frame->temp_max_x << ", " << frame->temp_max_y;
+
+        msg.data = ss.str();
+        m_pub.publish(msg);
+        ROS_DEBUG("%s", msg.data.c_str());
+    }
+
+private:
+    ros::Publisher &m_pub;
+};
+
 int main(int argc, char **argv)
 {
     struct f1_cfg f1cfg = {};
@@ -122,6 +153,9 @@ int main(int argc, char **argv)
 
     // Init flirone
     f1cfg.pal_path = "palettes/Rainbow.raw";
+    // f1cfg.pal_path = "palettes/Iron2.raw";
+    // f1cfg.pal_colors = 1;
+    // f1cfg.pal_inv = 1;
     f1_frame = f1_init(&f1cfg);
     if (f1_frame == NULL)
         return -1;
@@ -134,16 +168,19 @@ int main(int argc, char **argv)
         "/" NODE_NAME "/optical/image_raw/compressed", 256);
     ros::Publisher thermal_pub = n.advertise<sensor_msgs::Image>(
         "/" NODE_NAME "/thermal/image_raw", 256);
+    ros::Publisher thermal_info_pub = n.advertise<std_msgs::String>(
+        "/" NODE_NAME "/thermal/info", 1000);
 
     Mjpeg mjpeg(mjpeg_pub);
     Thermal thermal(thermal_pub);
+    ThermalInfo thermal_info(thermal_info_pub);
 
     // main loop
     for (int i = 0; ros::ok(); i++) {
         struct timeval tv = {};
         std_msgs::String msg;
-
         std::stringstream ss;
+
         ss << "msg#" << std::setw(3) << i << " ";
 
         // run flirone and check results
@@ -170,8 +207,10 @@ int main(int argc, char **argv)
         // publish images
         if (rc & F1L_NEW_IMG_FRAME)
             mjpeg.publish(f1_frame, tv);
-        if (rc & F1L_NEW_IR_FRAME)
+        if (rc & F1L_NEW_IR_FRAME) {
             thermal.publish(f1_frame, tv);
+            thermal_info.publish(f1_frame, tv);
+        }
 
         /* process callbacks */
         ros::spinOnce();

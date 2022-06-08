@@ -255,9 +255,15 @@ static int vframe(char ep[], char EP_error[], int r, int actual_length,
     // Print temperatures and time
     loctime = localtime (&now1);
 
+    f1_frame.temp_min = raw2temperature(min);
+    f1_frame.temp_med = raw2temperature(med);
+    f1_frame.temp_max = raw2temperature(max);
+    f1_frame.temp_max_x = maxx;
+    f1_frame.temp_max_y = maxy;
+
     sprintf(st1,"'C %.1f/%.1f/",
-        raw2temperature(min), raw2temperature(med));
-    sprintf(st2, "%.1f ", raw2temperature(max));
+        f1_frame.temp_min, f1_frame.temp_med);
+    sprintf(st2, "%.1f ", f1_frame.temp_max);
     strftime(&st2[strlen(st2)], 60, "%H:%M:%S", loctime);
 
     if (flirone_pro) {

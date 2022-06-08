@@ -34,6 +34,12 @@ struct f1_frame
     size_t ir_sz;
     uint32_t ir_width;
     uint32_t ir_height;
+
+    double temp_min;
+    double temp_med;
+    double temp_max;
+    uint32_t temp_max_x;
+    uint32_t temp_max_y;
 };
 
 struct f1_frame *f1_init(struct f1_cfg *cfg);
