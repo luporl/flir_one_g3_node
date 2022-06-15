@@ -39,6 +39,9 @@ set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} "-Wall")
 add_executable(${PROJECT_NAME}_node flir_one_g3_node.cpp flirone.c)
 target_link_libraries(${PROJECT_NAME}_node usb-1.0 ${catkin_LIBRARIES})
 
+add_dependencies(${PROJECT_NAME}_node ${${PROJECT_NAME}_EXPORTED_TARGETS})
+add_dependencies(${PROJECT_NAME}_node ${catkin_EXPORTED_TARGETS})
+
 #############
 ## Install ##
 #############
