@@ -6,11 +6,15 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   rospy
   std_msgs
+  message_generation
 )
 
 find_path(LIBUSB_INCLUDE_DIR
     NAMES libusb.h
     PATH_SUFFIXES "include" "libusb" "libusb-1.0")
+
+add_message_files(FILES ThermalInfo.msg)
+generate_messages(DEPENDENCIES std_msgs)
 
 ###################################
 ## catkin specific configuration ##
@@ -21,7 +25,7 @@ find_path(LIBUSB_INCLUDE_DIR
 ## LIBRARIES: libraries you create in this project that dependent projects also need
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
-catkin_package(CATKIN_DEPENDS roscpp rospy std_msgs)
+catkin_package(CATKIN_DEPENDS roscpp rospy std_msgs message_runtime)
 
 ###########
 ## Build ##

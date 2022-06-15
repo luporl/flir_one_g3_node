@@ -1,5 +1,6 @@
 // Own
 #include "flirone.h"
+#include "flir_one_g3/ThermalInfo.h"
 
 // ROS
 #include <ros/ros.h>
@@ -118,30 +119,40 @@ private:
 class ThermalInfo : public ImageMsg
 {
 public:
-    ThermalInfo(ros::Publisher &pub) : m_pub(pub)
+    ThermalInfo(ros::Publisher &pub, ros::Publisher &dbg_pub) :
+        m_pub(pub), m_dbg_pub(dbg_pub)
     {}
 
     void publish(struct f1_frame *frame, const struct timeval &tv)
     {
-        std_msgs::String msg;
-        std::ostringstream ss;
+        flir_one_g3::ThermalInfo msg;
 
-        ss << "min/med/max temps: ";
+        fill_header(msg.header, "thermal_info", tv);
+        msg.temp_min = frame->temp_min;
+        msg.temp_med = frame->temp_med;
+        msg.temp_max = frame->temp_max;
+        msg.temp_max_x = frame->temp_max_x;
+        msg.temp_max_y = frame->temp_max_y;
 
-        ss << std::fixed << std::setprecision(1) << std::setfill('0')
-           << frame->temp_min << "/"
-           << frame->temp_med << "/"
-           << frame->temp_max;
-
-        ss << " max @ " << frame->temp_max_x << ", " << frame->temp_max_y;
-
-        msg.data = ss.str();
         m_pub.publish(msg);
-        ROS_DEBUG("%s", msg.data.c_str());
+
+        std::ostringstream ss;
+        ss << msg;
+        ROS_DEBUG("%s", ss.str().c_str());
+
+        std_msgs::String smsg;
+        std::string s;
+        s = ss.str();
+        for (auto &c : s)
+            if (c == '\n')
+                c = ' ';
+        smsg.data = s;
+        m_dbg_pub.publish(smsg);
     }
 
 private:
     ros::Publisher &m_pub;
+    ros::Publisher &m_dbg_pub;
 };
 
 int main(int argc, char **argv)
@@ -191,12 +202,12 @@ int main(int argc, char **argv)
         "/" NODE_NAME "/optical/image_raw/compressed", 256);
     ros::Publisher thermal_pub = n.advertise<sensor_msgs::Image>(
         "/" NODE_NAME "/thermal/image_raw", 256);
-    ros::Publisher thermal_info_pub = n.advertise<std_msgs::String>(
+    ros::Publisher thermal_info_pub = n.advertise<flir_one_g3::ThermalInfo>(
         "/" NODE_NAME "/thermal/info", 1000);
 
     Mjpeg mjpeg(mjpeg_pub);
     Thermal thermal(thermal_pub);
-    ThermalInfo thermal_info(thermal_info_pub);
+    ThermalInfo thermal_info(thermal_info_pub, dbg_pub);
 
     // main loop
     for (int i = 0; ros::ok(); i++) {
